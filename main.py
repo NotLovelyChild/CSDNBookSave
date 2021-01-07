@@ -3,6 +3,7 @@ from selenium import webdriver
 from bs4 import BeautifulSoup
 from time import sleep
 import json
+import os
 
 chrome_options = webdriver.ChromeOptions()
 # chrome_options.add_argument('--headless')
@@ -13,9 +14,12 @@ driver = webdriver.Chrome(options=chrome_options)
 
 
 def save(content, path):
+    print("开始执行保存命令")
     path_wk = r'./wkhtmltopdf'
     config = pdfkit.configuration(wkhtmltopdf=path_wk)
-    pdfkit.from_string(content, path, configuration=config)
+    result = pdfkit.from_string("<meta charset='utf-8'>%s" % content, path, configuration=config)
+    if result:
+        print("保存成功")
 
 
 def checkLogin(soup):
@@ -35,7 +39,7 @@ def gotoLogin():
     soup = BeautifulSoup(driver.page_source, 'html.parser')
     if checkLogin(soup):
         saveCooks(driver.get_cookies())
-        return driver.get_cookies()
+        return True
     else:
         gotoLogin()
 
@@ -43,8 +47,8 @@ def gotoLogin():
 def saveCooks(cooks):
     with open('cooks.json', 'w') as file_obj:
         json.dump(cooks, file_obj)
-        print("写入json文件：")
-        file_obj.close
+        print("保存cookies")
+        file_obj.close()
 
 
 def addCooks():
@@ -53,7 +57,7 @@ def addCooks():
     try:
         with open('cooks.json', 'r') as file_obj:
             data = json.load(file_obj)
-            file_obj.close
+            file_obj.close()
     except IOError:
         print('IO error')
 
@@ -65,12 +69,122 @@ def addCooks():
     checkLogin(soup)
 
 
+def getBookList():
+    tags = driver.find_elements_by_class_name("category-item")
+    tagsData = []
+    for tag in tags:
+        if tag.text == "分类" or tag.text == "编辑推荐内容":
+            continue
+        tag.click()
+        tagname = tag.text
+        sleep(5)
+        while True:
+            sleep(0.5)
+            driver.execute_script('window.scrollBy(0,100)')
+            extra = driver.find_element_by_class_name("extra-info").find_element_by_class_name("text-align-center")
+            print(extra.is_displayed())
+            if extra.is_displayed():
+                break
+
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        booklist = soup.select(".category-book-item")
+        books = []
+        for book in booklist:
+            bookData = {}
+            a = book.select('a')
+            if len(a):
+                href = a[0]['href']
+                bookData['href'] = href
+
+            name = book.select('.book-title')
+            if len(name):
+                bookName = name[0].text
+                bookData['bookName'] = bookName
+
+            bookdesc = book.select('.book-desc')
+            if len(bookdesc):
+                desc = bookdesc[0].text
+                bookData['desc'] = desc
+
+            bookauthor = book.select('.book-author')
+            if len(bookauthor):
+                author = bookauthor[0].text
+                bookData['author'] = author
+
+            print(bookData)
+            books.append(bookData)
+
+        tagsData.append({
+            'tagName': tagname,
+            'bookData': books
+        })
+
+    with open('books.json', 'w') as file_obj:
+        json.dump(tagsData, file_obj)
+        print("保存书本数据")
+        file_obj.close()
+
+
+def downloadBook(bookUrl, bookName, bookAuthor, bookDesc, tagName):
+    # 文件夹检测
+    path = "/Volumes/J/PDFs/%s" % tagName
+    if not os.path.exists(path):
+        os.makedirs(path)
+        # 判断本地是否已经下载过
+    savePath = "%s/%s.pdf" % (path, bookName)
+    if os.path.exists(savePath):
+        print("%s 已存在" % bookName)
+        return
+    # 开始加载书本
+    book = ""
+    book += ("<h1>%s</h1>" % bookName)
+    book += ("<h2>%s</h2>" % bookAuthor)
+    book += ("<h3>%s</h3>" % bookDesc)
+    driver.get(bookUrl)
+    driver.find_element_by_class_name("csdn-buttom-red-default").click()
+    sleep(5)
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
+    bookName = driver.find_element_by_class_name("book-title").text
+    index = soup.select(".popup-info")
+    # 目录
+    if len(index):
+        book += str(index[0])
+
+    # 抓取每一章
+    while True:
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        bookContent = soup.select(".ebook-chapter-content")
+        if len(bookContent):
+            print(bookContent)
+            book += str(bookContent[0])
+        nextButton = driver.find_element_by_class_name("next")
+        if nextButton.text == "下一页":
+            nextButton.click()
+            sleep(5)
+            saveCooks(driver.get_cookies())
+        else:
+            break
+
+    save(book, savePath)
+
+
 if __name__ == '__main__':
-    chrome_options.add_argument('lang=zh_CN.UTF-8')
-    driver = webdriver.Chrome(options=chrome_options)
+    data = []
     driver.get("https://book.csdn.net")
     soup = BeautifulSoup(driver.page_source, 'html.parser')
     if not checkLogin(soup):
-        gotoLogin()
-    # print(soup)
-    # driver.quit()
+        if gotoLogin():
+            # 只需要运行一次
+            # getBookList()
+            try:
+                with open('books.json', 'r') as file_obj:
+                    data = json.load(file_obj)
+                    file_obj.close()
+            except IOError:
+                print('IO error')
+
+            for tag in data:
+                print(tag['tagName'])
+                for book in tag["bookData"]:
+                    print(book['bookName'])
+                    downloadBook(book['href'], book['bookName'], book['author'], book['desc'], tag['tagName'])
