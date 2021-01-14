@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 from time import sleep
 import json
 import os
+import threading
 
 chrome_options = webdriver.ChromeOptions()
 # chrome_options.add_argument('--headless')
@@ -13,13 +14,31 @@ chrome_options.add_argument('lang=zh_CN.UTF-8')
 driver = webdriver.Chrome(options=chrome_options)
 
 
+class pdfThread(threading.Thread):
+    def __init__(self, content, path):
+        threading.Thread.__init__(self)
+        self.content = content
+        self.path = path
+
+    def run(self) -> None:
+        path_wk = r'./wkhtmltopdf'
+        config = pdfkit.configuration(wkhtmltopdf=path_wk)
+        result = pdfkit.from_string("<meta charset='utf-8'>%s" % self.content, self.path, configuration=config)
+        if result:
+            print("%s 保存成功" % self.path)
+        else:
+            print("%s 保存失败" % self.path)
+
+
 def save(content, path):
+    p_thread = pdfThread(content, path.replace("html", "pdf"))
     print("开始执行保存命令")
-    path_wk = r'./wkhtmltopdf'
-    config = pdfkit.configuration(wkhtmltopdf=path_wk)
-    result = pdfkit.from_string("<meta charset='utf-8'>%s" % content, path, configuration=config)
-    if result:
-        print("保存成功")
+    print(path)
+    with open(path, 'w') as file_obj:
+        file_obj.write(content)
+        print("保存Html成功")
+        file_obj.close()
+        p_thread.start()
 
 
 def checkLogin(soup):
@@ -47,7 +66,6 @@ def gotoLogin():
 def saveCooks(cooks):
     with open('cooks.json', 'w') as file_obj:
         json.dump(cooks, file_obj)
-        print("保存cookies")
         file_obj.close()
 
 
@@ -131,7 +149,8 @@ def downloadBook(bookUrl, bookName, bookAuthor, bookDesc, tagName):
     if not os.path.exists(path):
         os.makedirs(path)
         # 判断本地是否已经下载过
-    savePath = "%s/%s.pdf" % (path, bookName)
+    # savePath = "%s/%s.pdf" % (path, bookName)
+    savePath = "%s/%s.html" % (path, bookName.replace("/","_"))
     if os.path.exists(savePath):
         print("%s 已存在" % bookName)
         return
@@ -144,23 +163,27 @@ def downloadBook(bookUrl, bookName, bookAuthor, bookDesc, tagName):
     driver.find_element_by_class_name("csdn-buttom-red-default").click()
     sleep(5)
     soup = BeautifulSoup(driver.page_source, 'html.parser')
-    bookName = driver.find_element_by_class_name("book-title").text
     index = soup.select(".popup-info")
     # 目录
     if len(index):
         book += str(index[0])
+
+    # 跳转第一章
+    bookID = bookUrl.split('/')[-1]
+    driver.get("https://book.csdn.net/book/%s/chapter/1" % bookID)
 
     # 抓取每一章
     while True:
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         bookContent = soup.select(".ebook-chapter-content")
         if len(bookContent):
-            print(bookContent)
             book += str(bookContent[0])
         nextButton = driver.find_element_by_class_name("next")
         if nextButton.text == "下一页":
+            driver.execute_script("window.scrollTo(0,document.body.scrollHeight)")
+            sleep(1)
             nextButton.click()
-            sleep(5)
+            sleep(4)
             saveCooks(driver.get_cookies())
         else:
             break
@@ -188,3 +211,6 @@ if __name__ == '__main__':
                 for book in tag["bookData"]:
                     print(book['bookName'])
                     downloadBook(book['href'], book['bookName'], book['author'], book['desc'], tag['tagName'])
+
+    print("内容抓取完毕")
+    sleep(10 * 60)
