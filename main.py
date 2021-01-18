@@ -100,7 +100,6 @@ def getBookList():
             sleep(0.5)
             driver.execute_script('window.scrollBy(0,100)')
             extra = driver.find_element_by_class_name("extra-info").find_element_by_class_name("text-align-center")
-            print(extra.is_displayed())
             if extra.is_displayed():
                 break
 
@@ -198,7 +197,7 @@ if __name__ == '__main__':
     if not checkLogin(soup):
         if gotoLogin():
             # 只需要运行一次
-            # getBookList()
+            getBookList()
             try:
                 with open('books.json', 'r') as file_obj:
                     data = json.load(file_obj)
